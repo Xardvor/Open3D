@@ -77,8 +77,6 @@ public:
     //virtual LightFluentInterface ModifyLight(const REHandle<eEntityType::Light>& id) = 0;
     void RemoveLight(const LightHandle& id) override ;
 
-    //virtual CameraFluentInterface ModifyCamera(const ruid<eEntityType::Camera>& id) = 0;
-
     MaterialHandle AddMaterial(const void* materialData, size_t dataSize) override;
     MaterialModifier& ModifyMaterial(const MaterialHandle& id) override;
     MaterialModifier& ModifyMaterial(const MaterialInstanceHandle& id) override;
@@ -87,6 +85,9 @@ public:
 private:
     filament::VertexBuffer* AllocateVertexBuffer(size_t verticesCount);
     filament::IndexBuffer* AllocateIndexBuffer(size_t indicesCount, size_t indexStride);
+
+    utils::Entity AddTriangleMesh(const geometry::Geometry3D& geometry, const MaterialInstanceHandle& materialId);
+    utils::Entity AddPointCloud(const geometry::Geometry3D& geometry, const MaterialInstanceHandle& materialId);
 
     filament::MaterialInstance* GetMaterialInstance(const MaterialInstanceHandle& materialId) const;
 

@@ -75,6 +75,7 @@ void PrintHelp() {
     utility::LogInfo("Usage :");
     utility::LogInfo("    > FilamentDemo sphere <material file>");
     utility::LogInfo("    > FilamentDemo mesh <mesh file> <material file>");
+    utility::LogInfo("    > FilamentDemo pointcloud <data file>");
 }
 
 int main(int argc, char *argv[]) {
@@ -87,33 +88,41 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    std::shared_ptr<geometry::TriangleMesh> mesh;
+    std::shared_ptr<geometry::Geometry3D> geometry;
     int materialPathIndex = 2;
 
     std::string option(argv[1]);
     if (option == "sphere") {
-        mesh = geometry::TriangleMesh::CreateSphere(42);
-        mesh->ComputeVertexNormals();
+        geometry = geometry::TriangleMesh::CreateSphere(42);
+        ((geometry::TriangleMesh*)geometry.get())->ComputeVertexNormals();
     } else if (option == "mesh") {
         if (argc < 3) {
             std::cout << "ERROR: You need to provide path to mesh file" << std::endl;
             return 2;
         }
 
-        mesh = std::make_shared<geometry::TriangleMesh>();
-        if (!io::ReadTriangleMesh(argv[2], *mesh)) {
+        geometry = std::make_shared<geometry::TriangleMesh>();
+        if (!io::ReadTriangleMesh(argv[2], *((geometry::TriangleMesh*)geometry.get()))) {
             std::cout << "ERROR: Failed to load mesh from " << argv[2] << std::endl;
             return 2;
         }
 
+        ((geometry::TriangleMesh*)geometry.get())->ComputeVertexNormals();
         materialPathIndex = 3;
-    } else {
+    } else if (option == "pointcloud") {
+        geometry = io::CreatePointCloudFromFile(argv[2]);
+        if (!geometry) {
+            std::cout << "ERROR: Failed to load point cloud from " << argv[2] << std::endl;
+            return 2;
+        }
+
+        ((geometry::PointCloud*)geometry.get())->NormalizeNormals();
+        materialPathIndex = 3;
+    }else {
         std::cout << "ERROR: Unknown option \'" << option << "\'" << std::endl;
         PrintHelp();
         return 1;
     }
-
-    mesh->ComputeVertexNormals();
 
     bool materialDataLoaded = false;
     std::vector<char> materialData;
@@ -150,18 +159,34 @@ int main(int argc, char *argv[]) {
     visualization::TheRenderer->SetViewport(0, 0, w, h);
     visualization::TheRenderer->SetClearColor({ 0.5f,0.5f,1.f });
     visualization::TheRenderer->GetCamera()->LookAt({0, 0, 0},
-            {80, 80, 80},
+            {0, 0, 0},
              {0, 1, 0});
+
+    float a = 0.f;
+    float b = 0.f;
+    float r = 10;
+
+    float cx = r*sinf(a)*cosf(b);
+    float cy = r*sinf(a)*sinf(b);
+    float cz = r*cosf(a);
+
+    Eigen::Vector3f pos(cx,cy,cz);
+    Eigen::Vector3f up{0,1,0};
+
+    visualization::TheRenderer->GetCamera()->LookAt({0, 0, 0},
+                                                    pos,
+                                                    up);
 
     visualization::MaterialInstanceHandle matInstance;
     if (materialDataLoaded) {
         visualization::MaterialHandle matId = visualization::TheRenderer->AddMaterial(materialData.data(), materialData.size());
 
         matInstance = visualization::TheRenderer->ModifyMaterial(matId)
-                .SetParameter("roughness", 0.5f)
-                .SetParameter("clearCoat", 1.0f)
-                .SetParameter("clearCoatRoughness", 0.3f)
-                .SetColor("baseColor", {1.f, 0.f, 0.f})
+                .SetParameter("pointSize", 1.f)
+                //.SetParameter("roughness", 0.5f)
+                //.SetParameter("clearCoat", 1.0f)
+                //.SetParameter("clearCoatRoughness", 0.3f)
+                //.SetColor("baseColor", {1.f, 0.f, 0.f})
                 .Finish();
     }
 
@@ -172,11 +197,19 @@ int main(int argc, char *argv[]) {
 
     visualization::TheRenderer->AddLight(lightDescription);
 
-    visualization::TheRenderer->AddGeometry(*mesh, matInstance);
+    visualization::TheRenderer->AddGeometry(*geometry, matInstance);
+
+    bool ra = false;
+    bool rb = false;
+    bool rr = false;
 
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     while (true) {
         bool isDone = false;
+
+        float da = 0.f;
+        float db = 0.f;
+        float dr = 0.f;
 
         constexpr int kMaxEvents = 16;
         SDL_Event events[kMaxEvents];
@@ -188,10 +221,49 @@ int main(int argc, char *argv[]) {
                 case SDL_QUIT:  // sent after last window closed
                     isDone = true;
                     break;
+
+                case SDL_KEYDOWN:
+                    switch (event.key.keysym.scancode) {
+                    case SDL_SCANCODE_W: ra = true; da = 0.01f; break;
+                    case SDL_SCANCODE_S: ra = true; da = -0.01f; break;
+                    case SDL_SCANCODE_A: rb = true; db = 0.01f; break;
+                    case SDL_SCANCODE_D: rb = true; db = -0.01f; break;
+                    case SDL_SCANCODE_Q: rr = true; dr = 0.1f; break;
+                    case SDL_SCANCODE_E: rr = true; dr = -0.1f; break;
+                    default: break;
+                    }
+                    break;
+
+                case SDL_KEYUP:
+                    switch (event.key.keysym.scancode) {
+                        case SDL_SCANCODE_W: ra = false; break;
+                        case SDL_SCANCODE_S: ra = false; break;
+                        case SDL_SCANCODE_A: rb = false; break;
+                        case SDL_SCANCODE_D: rb = false; break;
+                        case SDL_SCANCODE_Q: rr = false; break;
+                        case SDL_SCANCODE_E: rr = false; break;
+                        default: break;
+                    }
+                    break;
             }
 
             ++nevents;
         }
+
+        if (ra) a = a + da;
+        if (rb) b = b + db;
+        if (rr) r = r + dr;
+
+        float cx = r*sinf(a)*cosf(b);
+        float cy = r*sinf(a)*sinf(b);
+        float cz = r*cosf(a);
+
+        Eigen::Vector3f pos(cx,cy,cz);
+        Eigen::Vector3f up = pos.cross(visualization::TheRenderer->GetCamera()->GetLeftVector());
+
+        visualization::TheRenderer->GetCamera()->LookAt({0, 0, 0},
+                                                        pos,
+                                                        up);
 
         visualization::TheRenderer->Draw();
 

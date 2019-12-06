@@ -34,6 +34,7 @@
 #include <filament/geometry/SurfaceOrientation.h>
 
 #include "Open3D/Geometry/Geometry3D.h"
+#include "Open3D/Geometry/PointCloud.h"
 #include "Open3D/Geometry/TriangleMesh.h"
 #include "Open3D/Visualization/Rendering/Filament/FilamentCamera.h"
 #include "Open3D/Visualization/Rendering/Filament/FilamentEntitiesMods.h"
@@ -128,96 +129,27 @@ GeometryHandle FilamentRenderer::AddGeometry(const geometry::Geometry3D& geometr
     using namespace geometry;
     using namespace filament;
 
-    if (geometry.GetGeometryType() != Geometry::GeometryType::TriangleMesh)
-    {
-        return GeometryHandle::kBad;
+    utils::Entity renderable;
+    switch (geometry.GetGeometryType()) {
+        case Geometry::GeometryType::TriangleMesh:
+            renderable = AddTriangleMesh(geometry, materialId);
+        break;
+
+        case Geometry::GeometryType::PointCloud:
+            renderable = AddPointCloud(geometry, materialId);
+        break;
+
+        default:
+        break;
     }
 
-    auto triangleMesh = static_cast<const TriangleMesh&>(geometry);
-    const size_t nVertices = triangleMesh.vertices_.size();
+    GeometryHandle handle;
+    if (!renderable.isNull()) {
+        handle = GeometryHandle::Next();
+        entities[handle] = renderable;
 
-    VertexBuffer* vbuf = AllocateVertexBuffer(nVertices);
-
-    // Copying vertex coordinates
-    size_t coordsBytesCount = nVertices*3*sizeof(float);
-    auto *float3VCoord = (Eigen::Vector3f*)malloc(coordsBytesCount);
-    for (size_t i = 0; i < nVertices; ++i) {
-        float3VCoord[i] = triangleMesh.vertices_[i].cast<float>();
+        scene->addEntity(renderable);
     }
-
-    // Moving copied vertex coordinates to VertexBuffer
-    // malloc'ed memory will be freed later with freeBufferDescriptor
-    VertexBuffer::BufferDescriptor coordsDescriptor(float3VCoord, coordsBytesCount);
-    coordsDescriptor.setCallback(freeBufferDescriptor);
-    vbuf->setBufferAt(*engine, 0, std::move(coordsDescriptor));
-
-    // Converting vertex normals to float base
-    std::vector<Eigen::Vector3f> normals;
-    normals.resize(nVertices);
-    for (size_t i = 0; i < nVertices; ++i) {
-        normals[i] = triangleMesh.vertex_normals_[i].cast<float>();
-    }
-
-    // Converting normals to Filament type - quaternions
-    size_t tangentsBytesCount = nVertices*4*sizeof(float);
-    auto *float4VTangents = (math::quatf*)malloc(tangentsBytesCount);
-    auto orientation = filament::geometry::SurfaceOrientation::Builder()
-            .vertexCount(nVertices)
-            .normals((math::float3*)normals.data())
-            .build();
-    orientation.getQuats(float4VTangents, nVertices);
-
-    // Moving allocated tangents to VertexBuffer
-    // they will be freed later with freeBufferDescriptor
-    VertexBuffer::BufferDescriptor tangentsDescriptor(float4VTangents, tangentsBytesCount);
-    tangentsDescriptor.setCallback(freeBufferDescriptor);
-    vbuf->setBufferAt(*engine, 1, std::move(tangentsDescriptor));
-
-    auto indexStride = sizeof(triangleMesh.triangles_[0][0]);
-    IndexBuffer* ibuf = AllocateIndexBuffer(triangleMesh.triangles_.size() * 3, indexStride);
-
-    // Copying indices data
-    size_t indicesCount = triangleMesh.triangles_.size()*3*indexStride;
-    auto *uint3Indices = (Eigen::Vector3i*)malloc(indicesCount);
-    for (size_t i = 0; i < triangleMesh.triangles_.size(); ++i) {
-        uint3Indices[i] = triangleMesh.triangles_[i];
-    }
-
-    // Moving copied indices to IndexBuffer
-    // they will be freed later with freeBufferDescriptor
-    IndexBuffer::BufferDescriptor indicesDescriptor(uint3Indices, indicesCount);
-    indicesDescriptor.setCallback(freeBufferDescriptor);
-    ibuf->setBuffer(*engine, std::move(indicesDescriptor));
-
-    Box aabb;
-    if (indexStride == sizeof(std::uint16_t)) {
-        aabb = RenderableManager::computeAABB((math::float3*)float3VCoord,
-                                              (std::uint16_t*)uint3Indices,
-                                              nVertices);
-    } else {
-        aabb = RenderableManager::computeAABB((math::float3*)float3VCoord,
-                                              (std::uint32_t*)uint3Indices,
-                                              nVertices);
-    }
-
-    utils::Entity renderable = utils::EntityManager::get().create();
-    RenderableManager::Builder builder(1);
-    builder
-        .boundingBox(aabb)
-        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vbuf, ibuf)
-        .culling(false);
-
-    auto matInstance = GetMaterialInstance(materialId);
-    if (matInstance) {
-        builder.material(0, matInstance);
-    }
-
-    builder.build(*engine, renderable);
-
-    auto handle = GeometryHandle::Next();
-    entities[handle] = renderable;
-
-    scene->addEntity(renderable);
 
     return handle;
 }
@@ -239,10 +171,13 @@ LightHandle FilamentRenderer::AddLight(const LightDescription& descr)
         switch (descr.type) {
             case LightDescription::POINT:
                 lightType = filament::LightManager::Type::POINT;
+                break;
             case LightDescription::SPOT:
                 lightType = filament::LightManager::Type::SPOT;
+                break;
             case LightDescription::DIRECTIONAL:
                 lightType = filament::LightManager::Type::DIRECTIONAL;
+                break;
         }
     }
 
@@ -361,6 +296,209 @@ filament::IndexBuffer* FilamentRenderer::AllocateIndexBuffer(const size_t indice
     }
 
     return ibuf;
+}
+
+utils::Entity FilamentRenderer::AddTriangleMesh(const geometry::Geometry3D& geometry, const MaterialInstanceHandle& materialId)
+{
+    using namespace geometry;
+    using namespace filament;
+
+    auto triangleMesh = static_cast<const TriangleMesh&>(geometry);
+    const size_t nVertices = triangleMesh.vertices_.size();
+
+    VertexBuffer* vbuf = AllocateVertexBuffer(nVertices);
+
+    // Copying vertex coordinates
+    size_t coordsBytesCount = nVertices*3*sizeof(float);
+    auto *float3VCoord = (Eigen::Vector3f*)malloc(coordsBytesCount);
+    for (size_t i = 0; i < nVertices; ++i) {
+        float3VCoord[i] = triangleMesh.vertices_[i].cast<float>();
+    }
+
+    // Moving copied vertex coordinates to VertexBuffer
+    // malloc'ed memory will be freed later with freeBufferDescriptor
+    VertexBuffer::BufferDescriptor coordsDescriptor(float3VCoord, coordsBytesCount);
+    coordsDescriptor.setCallback(freeBufferDescriptor);
+    vbuf->setBufferAt(*engine, 0, std::move(coordsDescriptor));
+
+    // Converting vertex normals to float base
+    std::vector<Eigen::Vector3f> normals;
+    normals.resize(nVertices);
+    for (size_t i = 0; i < nVertices; ++i) {
+        normals[i] = triangleMesh.vertex_normals_[i].cast<float>();
+    }
+
+    // Converting normals to Filament type - quaternions
+    size_t tangentsBytesCount = nVertices*4*sizeof(float);
+    auto *float4VTangents = (math::quatf*)malloc(tangentsBytesCount);
+    auto orientation = filament::geometry::SurfaceOrientation::Builder()
+            .vertexCount(nVertices)
+            .normals((math::float3*)normals.data())
+            .build();
+    orientation.getQuats(float4VTangents, nVertices);
+
+    // Moving allocated tangents to VertexBuffer
+    // they will be freed later with freeBufferDescriptor
+    VertexBuffer::BufferDescriptor tangentsDescriptor(float4VTangents, tangentsBytesCount);
+    tangentsDescriptor.setCallback(freeBufferDescriptor);
+    vbuf->setBufferAt(*engine, 1, std::move(tangentsDescriptor));
+
+    auto indexStride = sizeof(triangleMesh.triangles_[0][0]);
+    IndexBuffer* ibuf = AllocateIndexBuffer(triangleMesh.triangles_.size() * 3, indexStride);
+
+    // Copying indices data
+    size_t indicesCount = triangleMesh.triangles_.size()*3*indexStride;
+    auto *uint3Indices = (Eigen::Vector3i*)malloc(indicesCount);
+    for (size_t i = 0; i < triangleMesh.triangles_.size(); ++i) {
+        uint3Indices[i] = triangleMesh.triangles_[i];
+    }
+
+    // Moving copied indices to IndexBuffer
+    // they will be freed later with freeBufferDescriptor
+    IndexBuffer::BufferDescriptor indicesDescriptor(uint3Indices, indicesCount);
+    indicesDescriptor.setCallback(freeBufferDescriptor);
+    ibuf->setBuffer(*engine, std::move(indicesDescriptor));
+
+    Box aabb;
+    if (indexStride == sizeof(std::uint16_t)) {
+        aabb = RenderableManager::computeAABB((math::float3*)float3VCoord,
+                                              (std::uint16_t*)uint3Indices,
+                                              nVertices);
+    } else {
+        aabb = RenderableManager::computeAABB((math::float3*)float3VCoord,
+                                              (std::uint32_t*)uint3Indices,
+                                              nVertices);
+    }
+
+    utils::Entity renderable = utils::EntityManager::get().create();
+    RenderableManager::Builder builder(1);
+    builder
+            .boundingBox(aabb)
+            .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vbuf, ibuf)
+            .culling(false);
+
+    auto matInstance = GetMaterialInstance(materialId);
+    if (matInstance) {
+        builder.material(0, matInstance);
+    }
+
+    builder.build(*engine, renderable);
+
+    return renderable;
+}
+
+utils::Entity FilamentRenderer::AddPointCloud(const geometry::Geometry3D& geometry, const MaterialInstanceHandle& materialId)
+{
+    using namespace geometry;
+    using namespace filament;
+
+    auto matInstance = GetMaterialInstance(materialId);
+    if (!matInstance) {
+        // TODO: assert or log that material is necessary for rendering a point cloud
+        return {};
+    }
+
+    auto pointCloud = static_cast<const PointCloud&>(geometry);
+    const size_t nVertices = pointCloud.points_.size();
+
+    // TODO: Figure out how to flexible allocate buffers with AllocateVertexBuffer
+    //       or remove AllocateVertexBuffer at all.
+    VertexBuffer* vbuf = VertexBuffer::Builder()
+            .bufferCount(3)
+            .vertexCount(nVertices)
+            .normalized(VertexAttribute::TANGENTS)
+            .normalized(VertexAttribute::COLOR)
+            .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT3, 0)
+            .attribute(VertexAttribute::TANGENTS, 1, VertexBuffer::AttributeType::FLOAT4, 0)
+            .attribute(VertexAttribute::COLOR, 2, VertexBuffer::AttributeType::FLOAT4, 0)
+            .build(*engine);
+
+    if (vbuf) {
+        vertexBuffers[VertexBufferHandle::Next()] = vbuf;
+    }
+
+    // Copying vertex coordinates
+    size_t coordsBytesCount = nVertices*3*sizeof(float);
+    auto *float3VCoord = (Eigen::Vector3f*)malloc(coordsBytesCount);
+    for (size_t i = 0; i < nVertices; ++i) {
+        float3VCoord[i] = pointCloud.points_[i].cast<float>();
+    }
+
+    // Moving copied vertex coordinates to VertexBuffer
+    // malloc'ed memory will be freed later with freeBufferDescriptor
+    VertexBuffer::BufferDescriptor coordsDescriptor(float3VCoord, coordsBytesCount);
+    coordsDescriptor.setCallback(freeBufferDescriptor);
+    vbuf->setBufferAt(*engine, 0, std::move(coordsDescriptor));
+
+    // Converting vertex normals to float base
+    std::vector<Eigen::Vector3f> normals;
+    normals.resize(nVertices);
+    for (size_t i = 0; i < nVertices; ++i) {
+        normals[i] = pointCloud.normals_[i].cast<float>();
+    }
+
+    // Converting normals to Filament type - quaternions
+    size_t tangentsBytesCount = nVertices*4*sizeof(float);
+    auto *float4VTangents = (math::quatf*)malloc(tangentsBytesCount);
+    auto orientation = filament::geometry::SurfaceOrientation::Builder()
+            .vertexCount(nVertices)
+            .normals((math::float3*)normals.data())
+            .build();
+    orientation.getQuats(float4VTangents, nVertices);
+
+    // Moving allocated tangents to VertexBuffer
+    // they will be freed later with freeBufferDescriptor
+    VertexBuffer::BufferDescriptor tangentsDescriptor(float4VTangents, tangentsBytesCount);
+    tangentsDescriptor.setCallback(freeBufferDescriptor);
+    vbuf->setBufferAt(*engine, 1, std::move(tangentsDescriptor));
+
+    // Copying colors
+    size_t colorsBytesCount = nVertices*4*sizeof(float);
+    auto *float4Colors = (math::float4*)malloc(colorsBytesCount);
+    for (size_t i = 0; i < nVertices; ++i) {
+        auto c = pointCloud.colors_[i];
+        float4Colors[i].r = c.x();
+        float4Colors[i].g = c.y();
+        float4Colors[i].b = c.z();
+        float4Colors[i].a = 1.f;
+    }
+
+    // Moving colors to VertexBuffer
+    // malloc'ed memory will be freed later with freeBufferDescriptor
+    VertexBuffer::BufferDescriptor colorsDescriptor(float4Colors, colorsBytesCount);
+    colorsDescriptor.setCallback(freeBufferDescriptor);
+    vbuf->setBufferAt(*engine, 2, std::move(colorsDescriptor));
+
+    IndexBuffer* ibuf = AllocateIndexBuffer(nVertices, sizeof(std::uint32_t));
+
+    // Creating indices data
+    using IndexType = std::uint32_t;
+    size_t indicesBytesCount = nVertices*sizeof(IndexType);
+    auto *uintIndices = (IndexType*)malloc(indicesBytesCount);
+    for (IndexType i = 0; i < nVertices; ++i) {
+        uintIndices[i] = i;
+    }
+
+    // Moving copied indices to IndexBuffer
+    // they will be freed later with freeBufferDescriptor
+    IndexBuffer::BufferDescriptor indicesDescriptor(uintIndices, indicesBytesCount);
+    indicesDescriptor.setCallback(freeBufferDescriptor);
+    ibuf->setBuffer(*engine, std::move(indicesDescriptor));
+
+    Box aabb = RenderableManager::computeAABB((math::float3*)float3VCoord,
+                                              (IndexType*)uintIndices,
+                                              nVertices);
+
+    utils::Entity renderable = utils::EntityManager::get().create();
+    RenderableManager::Builder builder(1);
+    builder
+        .boundingBox(aabb)
+        .geometry(0, RenderableManager::PrimitiveType::POINTS, vbuf, ibuf)
+        .culling(false)
+        .material(0, matInstance)
+        .build(*engine, renderable);
+
+    return renderable;
 }
 
 filament::MaterialInstance* FilamentRenderer::GetMaterialInstance(const MaterialInstanceHandle& materialId) const

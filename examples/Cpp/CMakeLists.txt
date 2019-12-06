@@ -38,9 +38,12 @@ if (ENABLE_GUI)
                        COMMAND ${GUIDEMO_MATC} ${GUIDEMO_MATC_ARGS} -o ${GUIDEMO_RSRCDIR}/metal.filamat ${CMAKE_CURRENT_SOURCE_DIR}/metal.mat)
     add_custom_command(OUTPUT ${GUIDEMO_RSRCDIR}/nonmetal.filamat
                        COMMAND ${GUIDEMO_MATC} ${GUIDEMO_MATC_ARGS} -o ${GUIDEMO_RSRCDIR}/nonmetal.filamat ${CMAKE_CURRENT_SOURCE_DIR}/nonmetal.mat)
+    add_custom_command(OUTPUT ${GUIDEMO_RSRCDIR}/pointcloud.filamat
+                       COMMAND ${GUIDEMO_MATC} ${GUIDEMO_MATC_ARGS} -o ${GUIDEMO_RSRCDIR}/pointcloud.filamat ${CMAKE_CURRENT_SOURCE_DIR}/pointcloud.mat)
     add_custom_target(GuiDemoResources
                       DEPENDS ${GUIDEMO_RSRCDIR}/metal.filamat
                               ${GUIDEMO_RSRCDIR}/nonmetal.filamat
+                              ${GUIDEMO_RSRCDIR}/pointcloud.filamat
                      )
     add_dependencies(GuiDemoResources filament_copy)
     add_dependencies(GuiDemo GuiDemoResources)
