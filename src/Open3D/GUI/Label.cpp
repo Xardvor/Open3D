@@ -54,6 +54,10 @@ const char* Label::GetText() const {
     return impl_->text.c_str();
 }
 
+void Label::SetText(const char* text) {
+    impl_->text = text;
+}
+
 Size Label::CalcPreferredSize(const Theme& theme) const {
     auto em = std::ceil(ImGui::GetTextLineHeight());
     auto padding = ImGui::GetStyle().FramePadding;

@@ -38,6 +38,7 @@ public:
     ~Label();
 
     const char* GetText() const; // std::string can cause ABI issues
+    void SetText(const char* text);
 
     Size CalcPreferredSize(const Theme& theme) const override;
 

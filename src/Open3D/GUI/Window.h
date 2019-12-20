@@ -72,17 +72,19 @@ public:
     std::function<void(Menu::ItemId)> OnMenuItemSelected;
 
 protected:
+    enum DrawResult { NONE, REDRAW };
+
     virtual void Layout(const Theme& theme);
+    virtual void OnMouseMove(const MouseMoveEvent& e);
+    virtual void OnMouseButton(const MouseButtonEvent& e);
+    virtual void OnMouseWheel(const MouseWheelEvent& e);
+    virtual void OnKey(const KeyEvent& e);
+
+    virtual DrawResult OnDraw(float dtSec);
 
 private:
-    enum DrawResult { NONE, REDRAW };
-    DrawResult OnDraw(float dtSec);
     DrawResult DrawOnce(float dtSec);
     void OnResize();
-    void OnMouseMove(const MouseMoveEvent& e);
-    void OnMouseButton(const MouseButtonEvent& e);
-    void OnMouseWheel(const MouseWheelEvent& e);
-    void OnKey(const KeyEvent& e);
     void OnTextInput(const TextInputEvent& e);
     void* GetNativeDrawable() const;
 

@@ -53,22 +53,35 @@ EXAMPLE_CPP(Voxelization              ${CMAKE_PROJECT_NAME})
 
 if (ENABLE_GUI)
     if (WIN32)
-        EXAMPLE_CPP(FilamentDemo      ${CMAKE_PROJECT_NAME} SDL2main$<$<CONFIG:Debug>:d>)
+        EXAMPLE_CPP(RenderingDemo     ${CMAKE_PROJECT_NAME} SDL2main$<$<CONFIG:Debug>:d>)
     else()
-        EXAMPLE_CPP(FilamentDemo      ${CMAKE_PROJECT_NAME})
+        EXAMPLE_CPP(RenderingDemo     ${CMAKE_PROJECT_NAME})
     endif()
     EXAMPLE_CPP(GuiDemo               ${CMAKE_PROJECT_NAME})
+    EXAMPLE_CPP(FilamentDemo          ${CMAKE_PROJECT_NAME})
 
     set(GUIDEMO_RSRC_DIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/examples/resources)
     if (WIN32)
         add_custom_target(GuiDemoResources
                           ${CMAKE_COMMAND} -E copy_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources ${GUIDEMO_RSRC_DIR})
+
+        add_custom_target(CopyTestData
+                COMMAND xcopy /s /i /y /f \"fragment.ply\" \"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources\"
+                COMMAND xcopy /s /i /y /f \"knot.ply\" \"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources\"
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/TestData)
     else ()
         add_custom_target(GuiDemoResources
                           rm -f ${GUIDEMO_RSRC_DIR}
                           COMMAND ln -s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources ${GUIDEMO_RSRC_DIR})
+
+        add_custom_target(CopyTestData
+                COMMAND cp -a fragment.ply ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources
+                COMMAND cp -a knot.ply ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/TestData)
     endif()
     add_dependencies(GuiDemo GuiDemoResources)
+    add_dependencies(FilamentDemo GuiDemoResources)
+    add_dependencies(FilamentDemo CopyTestData)
 
     # Copy .dll files on Windows
     if (WIN32)
