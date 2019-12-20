@@ -7,12 +7,15 @@ material {
         { type : float,  name : clearCoat },
         { type : float,  name : clearCoatRoughness }
     ],
+    requires : [
+        color
+    ],
 }
 
 fragment {
     void material(inout MaterialInputs material) {
         prepareMaterial(material);
-        material.baseColor.rgb = materialParams.baseColor;
+        material.baseColor = getColor() * vec4(materialParams.baseColor, 1);
         material.roughness = materialParams.roughness;
         material.clearCoat = materialParams.clearCoat;
         material.clearCoatRoughness = materialParams.clearCoatRoughness;
