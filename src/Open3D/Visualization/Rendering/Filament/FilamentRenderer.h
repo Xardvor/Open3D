@@ -28,12 +28,19 @@
 
 #include <filament/utils/Entity.h>
 
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
+#include "Open3D/Geometry/Image.h"
 #include "Open3D/Visualization/Rendering/Renderer.h"
 
 namespace filament {
+namespace backend {
+enum class PixelDataFormat : uint8_t;
+enum class PixelDataType : uint8_t;
+}
+
 class Engine;
 class Renderer;
 class Scene;
@@ -51,9 +58,29 @@ class FilamentView;
 
 class FilamentRenderer : public Renderer {
 public:
+    struct HeadlessModeSettings {
+        size_t width;
+        size_t height;
+
+        void* buffer;
+        size_t bufferSize;
+        // Defaults to RGB
+        filament::backend::PixelDataFormat pixelFormat;
+        // This is per channel, defaults to UBYTE
+        filament::backend::PixelDataType pixelType;
+
+        std::function<void(const HeadlessModeSettings&)> onReady;
+
+        HeadlessModeSettings();
+    };
+
     FilamentRenderer(filament::Engine& engine,
                      void* nativeDrawable,
                      FilamentResourceManager& resourceManager);
+
+    FilamentRenderer(filament::Engine& engine,
+                     FilamentResourceManager& resourceManager,
+                     HeadlessModeSettings&& headlessSettings);
     ~FilamentRenderer() override;
 
     SceneHandle CreateScene() override;
@@ -88,7 +115,49 @@ private:
     FilamentResourceManager& resourceManager_;
 
     bool frameStarted_ = false;
+
+    bool headlessMode_ = false;
+    struct HeadlessMode {
+        HeadlessModeSettings settings;
+
+        static void FilamentReadyCb(void* buffer, size_t size, void* user);
+    } headless_;
 };
+
+// Simple helper class to save each rendered frame to file.
+// Helper's lifespan should be longer than Renderer's.
+// Path is empty by default
+// Filename is "frame"
+// So, by default frame would be saved to "frame<number>.png"
+class HeadlessRenderHelper {
+public:
+    using Settings = FilamentRenderer::HeadlessModeSettings;
+
+    HeadlessRenderHelper(size_t width, size_t height);
+// TBD:
+//    HeadlessRenderHelper(size_t width,
+//                         size_t height,
+//                         filament::backend::PixelDataFormat pixelFormat,
+//                         filament::backend::PixelDataType pixelType);
+
+    void SetPath(std::string& path);
+    void SetFilename(std::string& name);
+    void SetQuality(int quality);
+
+    Settings MakeSettings() const;
+
+private:
+    geometry::Image img_;
+    Settings settings_;
+    std::uint32_t framesCounter_ = 1;
+
+    int quality_ = 100;
+    std::string path_;
+    std::string filename_ = "frame";
+
+    void OnReadyCallback(const Settings&);
+};
+
 
 }  // namespace visualization
 }  // namespace open3d

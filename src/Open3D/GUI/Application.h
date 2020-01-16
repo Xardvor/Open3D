@@ -51,6 +51,8 @@ public:
             const;  // std::string not good in interfaces for ABI reasons
     const Theme& GetTheme() const;
 
+    bool IsHeadlessEnabled() const;
+
 private:
     Application();
 

@@ -26,14 +26,15 @@
 
 #include "Application.h"
 
+
 #include "Events.h"
 #include "Theme.h"
 #include "Window.h"
 
+#include "Open3D/Utility/Console.h"
 #include "Open3D/Visualization/Rendering/Filament/FilamentEngine.h"
 
 #include <SDL.h>
-
 #include <chrono>
 #include <thread>
 #include <unordered_map>
@@ -175,6 +176,7 @@ struct Application::Impl {
     std::string resourcePath;
     std::unordered_map<uint32_t, std::shared_ptr<Window>> windows;
     Theme theme;
+    bool headlessEnabled = false;
 };
 
 Application &Application::GetInstance() {
@@ -221,6 +223,18 @@ Application::~Application() {}
 void Application::Initialize(int argc, const char *argv[]) {
     impl_->resourcePath = findResourcePath(argc, argv);
     impl_->theme.fontPath = impl_->resourcePath + "/" + impl_->theme.fontPath;
+
+    std::vector<std::string> strArgs;
+    strArgs.resize(argc);
+    for (int i = 0; i < argc; ++i) {
+        strArgs.emplace_back(argv[i]);
+    }
+
+    auto isHeadless = std::find(strArgs.begin(), strArgs.end(), "--headless");
+    if (isHeadless != strArgs.end()) {
+        utility::LogWarning("Headless mode is on");
+        impl_->headlessEnabled = true;
+    }
 }
 
 void Application::AddWindow(std::shared_ptr<Window> window) {
@@ -233,11 +247,13 @@ void Application::RemoveWindow(Window *window) {
     // messages, so we have to do them ourselves.
     int nWindows = impl_->windows.size();
 
-    SDL_Event e;
-    e.type = SDL_WINDOWEVENT;
-    e.window.windowID = window->GetID();
-    e.window.event = SDL_WINDOWEVENT_CLOSE;
-    SDL_PushEvent(&e);
+    if (false == impl_->headlessEnabled) {
+        SDL_Event e;
+        e.type = SDL_WINDOWEVENT;
+        e.window.windowID = window->GetID();
+        e.window.event = SDL_WINDOWEVENT_CLOSE;
+        SDL_PushEvent(&e);
+    }
 
     if (nWindows == 1) {
         SDL_Event quit;
@@ -253,6 +269,14 @@ void Application::Run() {
 
     bool done = false;
     std::unordered_map<Window *, int> eventCounts;
+
+    // We need this to draw windows for once at least
+    if (impl_->headlessEnabled) {
+        for (const auto& pair : impl_->windows) {
+            eventCounts[pair.second.get()] = 1;
+        }
+    }
+
     while (!done) {
         //        SDL_Window* sdlWindow = window->getSDLWindow();
         //        if (mWindowTitle != SDL_GetWindowTitle(sdlWindow)) {
@@ -263,10 +287,11 @@ void Application::Run() {
         //            mEngine->execute();
         //        }
 
-        eventCounts.clear();
         constexpr int kMaxEvents = 16;
         SDL_Event events[kMaxEvents];
         int nevents = 0;
+
+        bool willUpdate = false;
         while (nevents < kMaxEvents && SDL_PollEvent(&events[nevents]) != 0) {
             //            ImGuiIO& io = ImGui::GetIO();
             SDL_Event *event = &events[nevents];
@@ -406,11 +431,19 @@ void Application::Run() {
                     expose.type = SDL_WINDOWEVENT;
                     expose.window.windowID = w->GetID();
                     expose.window.event = SDL_WINDOWEVENT_EXPOSED;
+                    willUpdate = true;
                     SDL_PushEvent(&expose);
                 }
             }
         }
 
+        if (impl_->headlessEnabled && !willUpdate) {
+            SDL_Event quitEvent;
+            quitEvent.type = SDL_QUIT;
+            SDL_PushEvent(&quitEvent);
+        }
+
+        eventCounts.clear();
         SDL_Delay(RUNLOOP_DELAY_MSEC);
     }
 
@@ -422,6 +455,8 @@ const char *Application::GetResourcePath() const {
 }
 
 const Theme &Application::GetTheme() const { return impl_->theme; }
+
+bool Application::IsHeadlessEnabled() const { return impl_->headlessEnabled; }
 
 }  // namespace gui
 }  // namespace open3d

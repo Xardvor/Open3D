@@ -39,6 +39,7 @@ public:
     // Should be called before instance usage.
     // If not called, platform available default backend will be used.
     static void SelectBackend(filament::backend::Backend backend);
+    static void SetCustomPlatform(filament::backend::Platform* platform);
 
     static filament::Engine& GetInstance();
     static FilamentResourceManager& GetResourceManager();
@@ -51,6 +52,7 @@ private:
     EngineInstance();
 
     static filament::backend::Backend backend_;
+    static filament::backend::Platform* platform_;
     filament::Engine* engine_;
     FilamentResourceManager* resourceManager_;
 };

@@ -26,24 +26,25 @@
 
 #include "Window.h"
 
-#include "Application.h"
-#include "ImguiFilamentBridge.h"
-#include "Menu.h"
-#include "Native.h"
-#include "Renderer.h"
-#include "Theme.h"
-#include "Util.h"
-#include "Widget.h"
-
-#include "Open3D/Visualization/Rendering/Filament/FilamentEngine.h"
-#include "Open3D/Visualization/Rendering/Filament/FilamentRenderer.h"
-
+#include <Open3D/Geometry/Image.h>
 #include <SDL.h>
 #include <filament/Engine.h>
 #include <imgui.h>
 
 #include <cmath>
 #include <vector>
+
+#include "Application.h"
+#include "ImguiFilamentBridge.h"
+#include "Menu.h"
+#include "Native.h"
+#include "Open3D/IO/ClassIO/ImageIO.h"
+#include "Open3D/Visualization/Rendering/Filament/FilamentEngine.h"
+#include "Open3D/Visualization/Rendering/Filament/FilamentRenderer.h"
+#include "Renderer.h"
+#include "Theme.h"
+#include "Util.h"
+#include "Widget.h"
 
 #ifdef WIN32
 #include <SDL_syswm.h>
@@ -66,10 +67,45 @@ void updateImGuiForScaling(float newScaling) {
 
 }  // namespace
 
+class HeadlessModeHelper {
+public:
+    using Settings = visualization::FilamentRenderer::HeadlessModeSettings;
+
+    HeadlessModeHelper(const size_t w, const size_t h) {
+        settings_.width = w;
+        settings_.height = h;
+
+        img_.Prepare(w, h, 3, sizeof(std::uint8_t));
+
+        settings_.bufferSize = w * h * 3 * sizeof(std::uint8_t);
+        settings_.buffer = img_.data_.data();
+
+        settings_.onReady = std::bind(&HeadlessModeHelper::OnReadyCallback, this,
+                                     std::placeholders::_1);
+    }
+
+    Settings MakeSettings() const {
+        return settings_;
+    }
+
+private:
+    geometry::Image img_;
+    Settings settings_;
+    std::uint32_t framesCounter_ = 1;
+
+    void OnReadyCallback(const Settings&) {
+        io::WriteImage("frame" + std::to_string(framesCounter_) + ".png", img_, 100);
+        ++framesCounter_;
+    }
+};
+
+static uint32_t headlessIDCounter = 1;
+
 struct Window::Impl {
     SDL_Window* window = nullptr;
     Theme theme;  // so that the font size can be different based on scaling
     visualization::FilamentRenderer* renderer;
+    HeadlessModeHelper* headlessMode = nullptr;
     struct {
         std::unique_ptr<ImguiFilamentBridge> imguiBridge = nullptr;
         ImGuiContext* context;
@@ -80,15 +116,26 @@ struct Window::Impl {
     std::vector<std::shared_ptr<Widget>> children;
     bool needsLayout = true;
     int nSkippedFrames = 0;
+    uint32_t ID = 0;
+
+    ~Impl() {
+        delete headlessMode;
+    }
 };
 
 Window::Window(const std::string& title, int width, int height)
     : impl_(new Window::Impl()) {
-    const int x = SDL_WINDOWPOS_CENTERED;
-    const int y = SDL_WINDOWPOS_CENTERED;
-    uint32_t flags = SDL_WINDOW_SHOWN |  // so SDL's context gets created
-                     SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
-    impl_->window = SDL_CreateWindow(title.c_str(), x, y, width, height, flags);
+
+    const bool headlessMode = Application::GetInstance().IsHeadlessEnabled();
+
+    if (!headlessMode) {
+        const int x = SDL_WINDOWPOS_CENTERED;
+        const int y = SDL_WINDOWPOS_CENTERED;
+        uint32_t flags = (headlessMode ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN) |
+                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+        impl_->window =
+                SDL_CreateWindow(title.c_str(), x, y, width, height, flags);
+    }
 
     // On single-threaded platforms, Filament's OpenGL context must be current,
     // not SDL's context, so create the renderer after the window.
@@ -102,8 +149,16 @@ Window::Window(const std::string& title, int width, int height)
     auto& engineInstance = visualization::EngineInstance::GetInstance();
     auto& resourceManager = visualization::EngineInstance::GetResourceManager();
 
-    impl_->renderer = new visualization::FilamentRenderer(
-            engineInstance, GetNativeDrawable(), resourceManager);
+    if (headlessMode) {
+        impl_->ID = headlessIDCounter++;
+        impl_->headlessMode = new HeadlessModeHelper(width, height);
+        impl_->renderer = new visualization::FilamentRenderer(
+                engineInstance, resourceManager, impl_->headlessMode->MakeSettings());
+    } else {
+        impl_->ID = SDL_GetWindowID(impl_->window);
+        impl_->renderer = new visualization::FilamentRenderer(
+                engineInstance, GetNativeDrawable(), resourceManager);
+    }
 
     auto& theme = impl_->theme;  // shorter alias
     impl_->imgui.context = ImGui::CreateContext();
@@ -154,10 +209,12 @@ Window::Window(const std::string& title, int width, int height)
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
 #ifdef WIN32
-    SDL_SysWMinfo wmInfo;
-    SDL_VERSION(&wmInfo.version);
-    SDL_GetWindowWMInfo(impl_->window, &wmInfo);
-    io.ImeWindowHandle = wmInfo.info.win.window;
+    if (!headlessMode) {
+        SDL_SysWMinfo wmInfo;
+        SDL_VERSION(&wmInfo.version);
+        SDL_GetWindowWMInfo(impl_->window, &wmInfo);
+        io.ImeWindowHandle = wmInfo.info.win.window;
+    }
 #endif
     // ImGUI's io.KeysDown is indexed by our scan codes, and we fill out
     // io.KeyMap to map from our code to ImGui's code.
@@ -196,14 +253,24 @@ Window::~Window() {
     ImGui::SetCurrentContext(impl_->imgui.context);
     ImGui::DestroyContext();
     delete impl_->renderer;
-    SDL_DestroyWindow(impl_->window);
+
+    if (false == Application::GetInstance().IsHeadlessEnabled()) {
+        SDL_DestroyWindow(impl_->window);
+    }
 }
 
 void* Window::GetNativeDrawable() const {
-    return open3d::gui::GetNativeDrawable(impl_->window);
+    void* drawable = nullptr;
+    if (false == Application::GetInstance().IsHeadlessEnabled()) {
+        drawable = open3d::gui::GetNativeDrawable(impl_->window);
+    }
+
+    return drawable;
 }
 
-uint32_t Window::GetID() const { return SDL_GetWindowID(impl_->window); }
+uint32_t Window::GetID() const {
+    return impl_->ID;
+}
 
 const Theme& Window::GetTheme() const { return impl_->theme; }
 
@@ -213,7 +280,14 @@ visualization::Renderer& Window::GetRenderer() const {
 
 Size Window::GetSize() const {
     uint32_t w, h;
-    SDL_GL_GetDrawableSize(impl_->window, (int*)&w, (int*)&h);
+    if (Application::GetInstance().IsHeadlessEnabled()) {
+        auto settings = impl_->headlessMode->MakeSettings();
+        w = settings.width;
+        h = settings.height;
+    } else {
+        SDL_GL_GetDrawableSize(impl_->window, (int*)&w, (int*)&h);
+    }
+
     return Size(w, h);
 }
 
@@ -229,6 +303,10 @@ Rect Window::GetContentRect() const {
 }
 
 float Window::GetScaling() const {
+    if (Application::GetInstance().IsHeadlessEnabled()) {
+        return 1.f;
+    }
+
     uint32_t wPx, hPx;
     SDL_GL_GetDrawableSize(impl_->window, (int*)&wPx, (int*)&hPx);
     int wVpx, hVpx;
@@ -237,10 +315,18 @@ float Window::GetScaling() const {
 }
 
 bool Window::IsVisible() const {
+    if (Application::GetInstance().IsHeadlessEnabled()) {
+        return true;
+    }
+
     return (SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_SHOWN);
 }
 
 void Window::Show(bool vis /*= true*/) {
+    if (Application::GetInstance().IsHeadlessEnabled()) {
+        return;
+    }
+
     if (vis) {
         SDL_ShowWindow(impl_->window);
     } else {
@@ -274,6 +360,8 @@ void Window::Layout(const Theme& theme) {
 }
 
 Window::DrawResult Window::OnDraw(float dtSec) {
+    const bool headless = Application::GetInstance().IsHeadlessEnabled();
+
     // These are here to provide fast unique window names. If you find yourself
     // needing more than a handful, you should probably be using a container
     // of some sort (see Layout.h).
@@ -291,16 +379,21 @@ Window::DrawResult Window::OnDraw(float dtSec) {
     io.DeltaTime = dtSec;
 
     // Set mouse information
-    int mx, my, wx, wy;
+    int mx, my;
+    int wx = 0;
+    int wy = 0;
+
     Uint32 buttons = SDL_GetGlobalMouseState(&mx, &my);
-    SDL_GetWindowPosition(impl_->window, &wx, &wy);
+    if (!headless) {
+        SDL_GetWindowPosition(impl_->window, &wx, &wy);
+    }
     mx -= wx;
     my -= wy;
     io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
     io.MouseDown[0] = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
     io.MouseDown[1] = (buttons & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
     io.MouseDown[2] = (buttons & SDL_BUTTON(SDL_BUTTON_MIDDLE)) != 0;
-    if ((SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_INPUT_FOCUS) != 0) {
+    if (!headless && (SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_INPUT_FOCUS) != 0) {
         auto scaling = GetScaling();
         io.MousePos = ImVec2((float)mx * scaling, (float)my * scaling);
     }

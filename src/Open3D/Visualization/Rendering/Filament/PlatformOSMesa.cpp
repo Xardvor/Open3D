@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // The MIT License (MIT)
 //
-// Copyright (c) 2019 www.open3d.org
+// Copyright (c) 2020 www.open3d.org
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,54 +24,18 @@
 // IN THE SOFTWARE.
 // ----------------------------------------------------------------------------
 
-#include <cstddef>  // <filament/Engine> recursive includes needs this, std::size_t especially
-
-#include "FilamentEngine.h"
-
-#include "FilamentResourceManager.h"
+#include "PlatformOSMesa.h"
 
 namespace open3d {
 namespace visualization {
 
-filament::backend::Backend EngineInstance::backend_ =
-        filament::backend::Backend::DEFAULT;
-
-filament::backend::Platform* EngineInstance::platform_ = nullptr;
-
-void EngineInstance::SelectBackend(const filament::backend::Backend aBackend) {
-    backend_ = aBackend;
+int OSMesaPlatform::getOSVersion() const noexcept {
+    return 0;
 }
 
-void EngineInstance::SetCustomPlatform(filament::backend::Platform* platform) {
-    platform_ = platform;
+filament::backend::Driver* OSMesaPlatform::createDriver(void* sharedContext) noexcept {
+    return nullptr;
 }
 
-filament::Engine& EngineInstance::GetInstance() { return *Get().engine_; }
-
-FilamentResourceManager& EngineInstance::GetResourceManager() {
-    return *Get().resourceManager_;
 }
-
-EngineInstance::~EngineInstance() {
-    resourceManager_->DestroyAll();
-    delete resourceManager_;
-    resourceManager_ = nullptr;
-
-    filament::Engine::destroy(engine_);
-    engine_ = nullptr;
-
-    delete platform_;
 }
-
-EngineInstance& EngineInstance::Get() {
-    static EngineInstance instance;
-    return instance;
-}
-
-EngineInstance::EngineInstance() {
-    engine_ = filament::Engine::create(backend_, platform_);
-    resourceManager_ = new FilamentResourceManager(*engine_);
-}
-
-}  // namespace visualization
-}  // namespace open3d
